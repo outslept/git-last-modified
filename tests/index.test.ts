@@ -43,6 +43,9 @@ test("shares Git history across tracked, renamed, and untracked paths", async ()
     mkdirSync(join(root, "docs"), { recursive: true });
 
     const unusualName = process.platform === "win32" ? "line break.md" : "line\nbreak.md";
+    writeFileSync(join(root, "docs", unusualName), "initial\n");
+    commit(root, "Initial", 1_690_000_000, [`docs/${unusualName}`]);
+
     writeFileSync(join(root, "docs", "page.md"), "first\n");
     writeFileSync(join(root, "docs", unusualName), "unusual\n");
 
@@ -77,5 +80,44 @@ test("shares Git history across tracked, renamed, and untracked paths", async ()
     expect(oldPath).toBeNull();
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("handles unborn repo, shallow checkout, invalid inputs, and git errors", async () => {
+  const root = createRepository();
+  const nonGitDir = mkdtempSync(join(tmpdir(), "git-last-modified-nongit-"));
+
+  try {
+    const defaultHistory = createGitHistory();
+    await expect(defaultHistory.getLastUpdatedInfo(null as unknown as string)).rejects.toThrow(
+      TypeError,
+    );
+    await expect(defaultHistory.getLastUpdatedInfo("")).rejects.toThrow(TypeError);
+    await expect(defaultHistory.getLastUpdatedInfo("bad\0path")).rejects.toThrow(TypeError);
+
+    writeFileSync(join(root, "staged.md"), "staged\n");
+    git(root, ["add", "staged.md"]);
+    const unbornHistory = createGitHistory({ cwd: root });
+    expect(await unbornHistory.getLastUpdatedInfo("staged.md")).toBeNull();
+
+    commit(root, "Initial", 1_700_000_000);
+    writeFileSync(join(root, ".git", "shallow"), git(root, ["rev-parse", "HEAD"]));
+    const shallowHistory = createGitHistory({ cwd: root });
+    await expect(shallowHistory.getLastUpdatedInfo("staged.md")).rejects.toThrow(
+      /Shallow git checkout/,
+    );
+
+    const brokenHistory = createGitHistory({ cwd: nonGitDir });
+    await expect(brokenHistory.getLastUpdatedInfo("file.md")).rejects.toThrow(
+      /git rev-parse failed/,
+    );
+
+    const missingCwdHistory = createGitHistory({ cwd: join(nonGitDir, "missing") });
+    await expect(missingCwdHistory.getLastUpdatedInfo("file.md")).rejects.toThrow(
+      /Unable to start git/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(nonGitDir, { recursive: true, force: true });
   }
 });
