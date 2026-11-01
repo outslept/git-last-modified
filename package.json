@@ -1,16 +1,15 @@
 {
   "name": "git-last-modified",
   "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "homepage": "https://github.com/author/library#readme",
+  "description": "Get the last committed author and date for files in a Git repository",
+  "homepage": "https://github.com/outslept/git-last-modified#readme",
   "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "https://github.com/outslept/git-last-modified/issues"
   },
   "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
+    "url": "git+https://github.com/outslept/git-last-modified.git"
   },
   "files": [
     "dist"
