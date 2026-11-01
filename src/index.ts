@@ -17,6 +17,7 @@ export interface GitHistory {
 interface Repository {
   root: string;
   trackedFiles: Set<string>;
+  hasCommits: boolean;
 }
 
 interface StoredUpdate {
@@ -40,13 +41,23 @@ export function createGitHistory(options: GitHistoryOptions = {}): GitHistory {
     repositoryPromise ??= (async () => {
       const rootOutput = await gitText(cwd, ["rev-parse", "--show-toplevel"]);
       const root = resolve(removeTrailingNewline(rootOutput));
-      const trackedFiles = new Set<string>();
 
+      const isShallow = removeTrailingNewline(
+        await gitText(root, ["rev-parse", "--is-shallow-repository"]),
+      );
+      if (isShallow === "true") {
+        throw new Error(
+          "Shallow git checkout: last-updated dates would be wrong for every file. " +
+            "Fetch the full history first (git fetch --unshallow, or fetch-depth: 0 in CI).",
+        );
+      }
+
+      const trackedFiles = new Set<string>();
       await forEachNulToken(root, ["ls-files", "-z"], (file) => {
         if (file) trackedFiles.add(file);
       });
 
-      return { root, trackedFiles };
+      return { root, trackedFiles, hasCommits: await hasCommits(root) };
     })();
 
     return repositoryPromise;
@@ -76,7 +87,9 @@ export function createGitHistory(options: GitHistoryOptions = {}): GitHistory {
         return null;
       }
 
-      historyPromise ??= readHistory(repository.root, repository.trackedFiles);
+      historyPromise ??= repository.hasCommits
+        ? readHistory(repository.root, repository.trackedFiles)
+        : Promise.resolve(new Map<string, StoredUpdate>());
 
       const update = (await historyPromise).get(gitPath);
 
@@ -181,11 +194,16 @@ async function readHistory(
     },
   );
 
-  // if (phase === 'timestamp' || phase === 'author' || phase === 'path') {
-  // throw new Error('Incomplete output from git log')
-  // }
-
   return updates;
+}
+
+async function hasCommits(cwd: string): Promise<boolean> {
+  try {
+    await gitText(cwd, ["rev-parse", "--verify", "-q", "HEAD"]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function gitText(cwd: string, args: string[]): Promise<string> {
