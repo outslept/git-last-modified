@@ -4,11 +4,13 @@ Get the last committed author and date for files in a Git repository.
 
 Designed for many file lookups: the first tracked-file request builds a shared, in-memory history index instead of spawning one Git process per file.
 
-Requires Node.js and the `git` executable. The package has no runtime dependencies.
+Requires Node.js, the `git` executable, and a full (non-shallow) Git checkout. The package has no runtime dependencies.
 
 ## Usage
 
 ```ts
+import { createGitHistory } from "git-last-modified";
+
 const history = createGitHistory({ cwd: process.cwd() });
 
 const info = await history.getLastUpdatedInfo("docs/test.md");
@@ -41,6 +43,6 @@ getLastUpdatedInfo(
 
 - `filePath` may be relative to `cwd` or absolute.
 
-Returns `null` if the path is outside the repository, is not in the current Git index, or has no commit in the available history. Git command failures reject the promise.
+Returns `null` if the path is outside the repository, is not in the current Git index, or is staged but not yet committed.
 
 `date` is the commit author's timestamp; `author` is the Git author name.

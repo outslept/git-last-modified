@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { relative, resolve, sep } from "node:path";
 
 export interface GitHistoryOptions {
   cwd?: string;
@@ -54,7 +54,7 @@ export function createGitHistory(options: GitHistoryOptions = {}): GitHistory {
 
       const trackedFiles = new Set<string>();
       await forEachNulToken(root, ["ls-files", "-z"], (file) => {
-        if (file) trackedFiles.add(file);
+        trackedFiles.add(file);
       });
 
       return { root, trackedFiles, hasCommits: await hasCommits(root) };
@@ -70,18 +70,7 @@ export function createGitHistory(options: GitHistoryOptions = {}): GitHistory {
       }
 
       const repository = await getRepository();
-      const relativePath = relative(repository.root, resolve(cwd, filePath));
-
-      if (
-        !relativePath ||
-        relativePath === ".." ||
-        relativePath.startsWith(`..${sep}`) ||
-        isAbsolute(relativePath)
-      ) {
-        return null;
-      }
-
-      const gitPath = relativePath.split(sep).join("/");
+      const gitPath = relative(repository.root, resolve(cwd, filePath)).split(sep).join("/");
 
       if (!repository.trackedFiles.has(gitPath)) {
         return null;
@@ -107,12 +96,12 @@ async function readHistory(
   let phase: LogPhase = "hash";
   let timestampMs = 0;
   let currentUpdate: StoredUpdate | undefined;
-  let remainingPaths = 0;
 
   await forEachNulToken(
     root,
     [
       "log",
+      "--no-show-signature",
       "--root",
       "--date-order",
       "-m",
@@ -177,7 +166,6 @@ async function readHistory(
             throw new Error("Unexpected file status from git log");
           }
 
-          remainingPaths = status[0] === "R" || status[0] === "C" ? 2 : 1;
           phase = "path";
           return;
         }
@@ -186,10 +174,7 @@ async function readHistory(
           if (currentUpdate && trackedFiles.has(token) && !updates.has(token)) {
             updates.set(token, currentUpdate);
           }
-
-          if (--remainingPaths === 0) {
-            phase = "status";
-          }
+          phase = "status";
       }
     },
   );
@@ -252,7 +237,7 @@ async function runGit(
   let stderr = "";
   let spawnError: Error | undefined;
 
-  child.stderr?.on("data", (chunk: Buffer) => {
+  child.stderr.on("data", (chunk: Buffer) => {
     if (stderr.length < MAX_STDERR_LENGTH) {
       stderr += chunk.toString("utf8").slice(0, MAX_STDERR_LENGTH - stderr.length);
     }
@@ -265,15 +250,8 @@ async function runGit(
     child.once("close", () => resolveClosed());
   });
 
-  const stdout = child.stdout;
-  if (!stdout) {
-    child.kill();
-    await closed;
-    throw new Error("Git stdout is unavailable");
-  }
-
   try {
-    for await (const chunk of stdout) {
+    for await (const chunk of child.stdout) {
       onChunk(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
   } catch (error) {
