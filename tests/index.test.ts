@@ -22,10 +22,24 @@ function createRepository(): string {
   return root;
 }
 
-function commit(root: string, author: string, timestamp: number, files?: string[]): void {
-  git(root, files ? ["add", "--", ...files] : ["add", "--all"]);
+function cleanDir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
 
-  git(root, ["commit", "--quiet", "-m", author], {
+function commit(
+  root: string,
+  author: string,
+  timestamp: number,
+  files?: string[],
+  extraArgs: string[] = [],
+): void {
+  if (files) {
+    git(root, ["add", "--", ...files]);
+  } else if (extraArgs.length === 0) {
+    git(root, ["add", "--all"]);
+  }
+
+  git(root, ["commit", "--quiet", "-m", author, ...extraArgs], {
     ...process.env,
     GIT_AUTHOR_NAME: author,
     GIT_AUTHOR_EMAIL: "author@example.test",
@@ -36,7 +50,7 @@ function commit(root: string, author: string, timestamp: number, files?: string[
   });
 }
 
-test("shares Git history across tracked, renamed, and untracked paths", async () => {
+test("shares Git history across tracked, renamed, staged-only, and subdirectory paths", async () => {
   const root = createRepository();
 
   try {
@@ -57,29 +71,40 @@ test("shares Git history across tracked, renamed, and untracked paths", async ()
     renameSync(join(root, "docs", "page.md"), join(root, "docs", "renamed.md"));
     commit(root, "Renamer", 1_720_000_000);
 
-    const history = createGitHistory({ cwd: root });
+    commit(root, "EmptyCommit", 1_730_000_000, undefined, ["--allow-empty"]);
 
-    const [renamed, unusual, untracked, outside, oldPath] = await Promise.all([
-      history.getLastUpdatedInfo(join(root, "docs", "renamed.md")),
-      history.getLastUpdatedInfo(`docs/${unusualName}`),
-      history.getLastUpdatedInfo("not-tracked.md"),
-      history.getLastUpdatedInfo("../outside.md"),
-      history.getLastUpdatedInfo("docs/page.md"),
-    ]);
+    writeFileSync(join(root, "docs", "uncommitted.md"), "draft\n");
+    git(root, ["add", "docs/uncommitted.md"]);
+
+    const history = createGitHistory({ cwd: root });
+    const subDirHistory = createGitHistory({ cwd: join(root, "docs") });
+
+    const [renamed, fromSubDir, unusual, uncommitted, untracked, outside, oldPath] =
+      await Promise.all([
+        history.getLastUpdatedInfo(join(root, "docs", "renamed.md")),
+        subDirHistory.getLastUpdatedInfo("renamed.md"),
+        history.getLastUpdatedInfo(`docs/${unusualName}`),
+        history.getLastUpdatedInfo("docs/uncommitted.md"),
+        history.getLastUpdatedInfo("not-tracked.md"),
+        history.getLastUpdatedInfo("../outside.md"),
+        history.getLastUpdatedInfo("docs/page.md"),
+      ]);
 
     expect(renamed).toEqual({
       date: new Date(1_720_000_000 * 1000),
       author: "Renamer",
     });
+    expect(fromSubDir).toEqual(renamed);
     expect(unusual).toEqual({
       date: new Date(1_700_000_000 * 1000),
       author: "Original",
     });
+    expect(uncommitted).toBeNull();
     expect(untracked).toBeNull();
     expect(outside).toBeNull();
     expect(oldPath).toBeNull();
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    cleanDir(root);
   }
 });
 
@@ -117,7 +142,7 @@ test("handles unborn repo, shallow checkout, invalid inputs, and git errors", as
       /Unable to start git/,
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(nonGitDir, { recursive: true, force: true });
+    cleanDir(root);
+    cleanDir(nonGitDir);
   }
 });
