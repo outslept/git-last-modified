@@ -1,48 +1,61 @@
 # git-last-modified
 
-Get the last committed author and date for files in a Git repository.
+Get the last committed author, timestamp, and commit hash for files in a Git repository.
 
-Designed for many file lookups: the first tracked-file request builds a shared, in-memory history index instead of spawning one Git process per file.
-
-Requires Node.js, the `git` executable, and a full (non-shallow) Git checkout. The package has no runtime dependencies.
+Queries the repository in a single streaming `git log -z` pass with early termination once all tracked files are resolved. Zero dependencies.
 
 ## Usage
+
+### Single file or full repository map
+
+```ts
+import { getLastModified, getLastModifiedMap } from "git-last-modified";
+
+const info = await getLastModified("src/index.ts");
+// {
+//   date: 2026-02-14T12:00:00.000Z,
+//   timestamp: 1771070400000,
+//   author: "eugene",
+//   hash: "a1b2c3d4..."
+// }
+
+const allFiles = await getLastModifiedMap();
+const readmeInfo = allFiles.get("README.md");
+```
+
+### Shared instance (recommended for build tools & SSG plugins)
+
+`createGitHistory` caches the repository index and commit map across concurrent lookups:
 
 ```ts
 import { createGitHistory } from "git-last-modified";
 
 const history = createGitHistory({ cwd: process.cwd() });
 
-const info = await history.getLastUpdatedInfo("docs/test.md");
-
-if (info) {
-  console.log(info.date);
-  console.log(info.author);
-}
+const [a, b] = await Promise.all([history.get("docs/intro.md"), history.get("docs/api.md")]);
 ```
 
 ## API
 
-`createGitHistory(options?)`
+### `getLastModified(filePath, options?): Promise<LastUpdatedInfo | null>`
 
-Create a history reader for a Git repository.
+Returns the most recent commit metadata for `filePath`, or `null` if the file is untracked or has never been committed.
 
-```ts
-createGitHistory({ cwd?: string })
-```
+### `getLastModifiedMap(options?): Promise<Map<string, LastUpdatedInfo>>`
 
-- `cwd` - repository directory or a directory inside it. Defaults to `process.cwd()`.
+Returns a `Map` keyed by repository-relative POSIX paths (`"src/index.ts"`) for all committed tracked files.
 
-`history.getLastUpdatedInfo(filePath)`
+### `createGitHistory(options?): GitHistory`
 
-```ts
-getLastUpdatedInfo(
-  filePath: string,
-): Promise<{ date: Date; author: string } | null>
-```
+Creates a cached instance with `.get(filePath)`, `.getAll()`, and `.getLastUpdatedInfo(filePath)`.
 
-- `filePath` may be relative to `cwd` or absolute.
+#### `GitHistoryOptions`
 
-Returns `null` if the path is outside the repository, is not in the current Git index, or is staged but not yet committed.
+| Option         | Type      | Default         | Description                                                                       |
+| :------------- | :-------- | :-------------- | :-------------------------------------------------------------------------------- |
+| `cwd`          | `string`  | `process.cwd()` | Working directory inside the target Git repository.                               |
+| `allowShallow` | `boolean` | `false`         | Allow running in shallow clones (`fetch-depth > 0`) instead of throwing an error. |
 
-`date` is the commit author's timestamp; `author` is the Git author name.
+## License
+
+MIT
